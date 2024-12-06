@@ -28,6 +28,9 @@ selected_helices = reactive.value(([], [], 0))
 retained_helices_by_length = reactive.value([])
 pair_distances = reactive.value([])
 
+df_selected_helices = reactive.value(([], [], 0))
+pair_distances_df_selected = reactive.value([])
+
 
 ui.head_content(ui.tags.title("HelicalPitch"))
 helicon.shiny.google_analytics(id="G-998MGRETTF")
@@ -242,6 +245,76 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                         ui.update_numeric("min_len", max=input.max_len())
                     if input.min_len() >= input.max_len():
                         ui.update_numeric("min_len", value=0)
+            
+            @render.data_frame
+            @reactive.event(params, input.select_classes)
+            def display_helices_dataframe():
+                df = params()
+                # Group df by helixID and create a summary dataframe
+                summary_df = (
+                    df.groupby("helixID")
+                    .agg(
+                        {
+                            "length": "first",
+                            "rlnClassNumber": lambda x: list(x.value_counts().index),
+                            "rlnMicrographName": "first",
+                        }
+                    )
+                    .reset_index()
+                )
+                summary_df = summary_df.rename(columns={"rlnClassNumber": "classes"})
+
+                if len(input.select_classes()):
+                    selected_classes = [
+                        int(displayed_class_ids()[i]) + 1 for i in input.select_classes()
+                    ]
+                    summary_df = summary_df[
+                        summary_df["classes"].apply(
+                            lambda x: any(cls in selected_classes for cls in x)
+                        )
+                    ]
+
+                summary_df["classes"] = summary_df["classes"].apply(
+                    lambda x: ",".join(map(str, x))
+                )
+                summary_df = summary_df.sort_values("length", ascending=False)
+
+                # Use the summary dataframe for display
+                df = summary_df
+                return render.DataGrid(
+                    summary_df,
+                    selection_mode="rows",
+                    filters=True,
+                    height="30vh",
+                    width="100%",
+                )
+            
+            @reactive.effect
+            def get_df_selected_helices():
+                df_selected = display_helices_dataframe.data_view(selected=True)
+                df_selected_helixids = df_selected['helixID'].tolist()
+                mask = params()["helixID"].astype(int).isin(df_selected_helixids)
+                particles = params().loc[mask, :]
+                class_indices = [displayed_class_ids()[i] for i in input.select_classes()]
+                helices = compute.select_classes(params=particles, class_indices=class_indices)
+                
+                
+                #if len(helices):
+                #    class_indices2 = (
+                #        np.unique(
+                #            np.concatenate([h["rlnClassNumber"] for hi, h in helices])
+                #        ).astype(int)
+                #        - 1
+                #    )
+                #    assert set(class_indices) == set(class_indices2)
+                if len(helices):
+                    filement_lengths = compute.get_filament_length(helices=helices)
+                    segments_count = np.sum([abundance()[i] for i in class_indices])
+                else:
+                    filement_lengths = []
+                    segments_count = 0
+
+                df_selected_helices.set((helices, filement_lengths, segments_count))
 
     with ui.card(max_height="90vh"):
 
@@ -321,6 +394,88 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
             else:
                 return None
 
+        @render_plotly
+        @reactive.event(pair_distances_df_selected, input.bins, input.max_pair_dist, input.rise)
+        def pair_distances_histogram_df_selected_display():
+            req(input.bins() is not None and input.bins() > 0)
+            req(input.max_pair_dist() is not None)
+            req(input.rise() is not None and input.rise() > 0)
+            fig = getattr(pair_distances_histogram_df_selected_display, "fig", None)
+            data = pair_distances_df_selected()
+            
+            try:
+                pitch = compute.find_pitch(data)
+                print('Found pitch = '+ str(pitch))
+            except:
+                print('No pitch found')
+            
+            (helices, filement_lengths, _) = df_selected_helices()
+            
+            if len(helices):
+                class_indices = np.unique(
+                    np.concatenate(
+                        [h["rlnClassNumber"] for hi, h in helices]
+                    )
+                ).astype(int)
+            else:
+                class_indices = []
+            class_indices = [
+                str(displayed_class_ids()[i] + 1)
+                for i in input.select_classes()
+                if (displayed_class_ids()[i] + 1) in class_indices
+            ]
+            segment_count = np.sum([len(h) for hi, h in helices])
+            rise = input.rise()
+            log_y = True
+            title = f"Pair Distances: Class {' '.join(class_indices)}<br><i>{len(helices)} filaments | {segment_count:,} segments | {len(pair_distances_df_selected()):,} segment pairs"
+            xlabel = "Pair Distance (Å)"
+            ylabel = "# of Pairs"
+            nbins = input.bins()
+            max_pair_dist = input.max_pair_dist()
+
+            fig = compute.plot_histogram(
+                data=data,
+                title=title,
+                xlabel=xlabel,
+                ylabel=ylabel,
+                max_pair_dist=max_pair_dist,
+                bins=nbins,
+                log_y=log_y,
+                show_pitch_twist=dict(rise=rise, csyms=(1, 2, 3, 4)),
+                multi_crosshair=True,
+                fig=fig,
+            )
+            pair_distances_histogram_df_selected_display.fig = fig
+
+            return fig
+
+        #@render.ui
+        #def get_download_estimated_first_peaks_ui():
+        #    download_ui = render.download(
+        #        label="Download estimated first peaks", filename="peaks.txt"
+        #    )
+
+        #    @download_ui
+        #    def download_estimated_first_peaks():
+        #        df_selected = display_helices_dataframe.data_view(selected=True)
+        #        df_selected_helixids = df_selected['helixID'].tolist()
+        #        out_str=""
+        #        for hid in df_selected_helixids:
+        #            mask = params()["helixID"].astype(int).isin([hid])
+        #            particles = params().loc[mask, :]
+        #            class_indices = [displayed_class_ids()[i] for i in input.select_classes()]
+        #            helices = compute.select_classes(params=particles, class_indices=class_indices)
+        #            dists, _ = compute.compute_pair_distances(helices=helices)
+        #            try:
+        #                first_peak,peaks = compute.find_first_peak(dists)                
+        #            except:
+        #                first_peak=0
+        #                peaks=[]
+        #            out_str+= str(hid)+","+str(first_peak)+","+str(peaks)+"\n"
+        #        yield out_str
+        #    
+        #    return download_ui
+
     ui.HTML(
         "<i><p>Developed by the <a href='https://jiang.bio.purdue.edu/HelicalPitch' target='_blank'>Jiang Lab</a>. Report issues to <a href='https://github.com/jianglab/HelicalPitch/issues' target='_blank'>HelicalPitch@GitHub</a>.</p></i>"
     )
@@ -390,7 +545,7 @@ def get_displayed_class_images():
     except Exception as e:
         print(e)
         m = ui.modal(
-            f"Failed to get class abundance from the provided Class2D parameter and  image files. Make sure that the two files are for the same Class2D job",
+            f"Failed to get class abundance from the provided Class2D parameter and image files. Make sure that the two files are for the same Class2D job",
             title="Information error",
             easy_close=True,
             footer=None,
@@ -429,7 +584,7 @@ def get_params_from_upload():
     param_file = fileinfo[0]["datapath"]
     msg = None
     try:
-        tmp_params = compute.get_class2d_params_from_file(param_file)
+        tmp_params = compute.get_class2d_helix_params_from_file(param_file)
     except Exception as e:
         print(e)
         msg = str(e).replace(param_file, fileinfo[0]["name"])
@@ -458,7 +613,7 @@ def get_params_from_url():
     url = input.url_params()
     msg = None
     try:
-        tmp_params = compute.get_class2d_params_from_url(url)
+        tmp_params = compute.get_class2d_helix_params_from_url(url)
     except Exception as e:
         print(e)
         msg = str(e)
@@ -510,6 +665,7 @@ def get_selected_helices():
     selected_helices.set((helices, filement_lengths, segments_count))
     if not input.auto_min_len():
         selected_helices_min_len.set((selected_helices(), input.min_len()))
+
 
 
 @reactive.effect
@@ -564,6 +720,16 @@ def get_pair_lengths():
         pair_distances.set(dists)
     else:
         pair_distances.set([])
+        
+@reactive.effect
+@reactive.event(df_selected_helices)
+def get_pair_lengths_df_selected():
+    (helices, filement_lengths, _) = df_selected_helices()
+    if len(helices):
+        dists, _ = compute.compute_pair_distances(helices=helices)
+        pair_distances_df_selected.set(dists)
+    else:
+        pair_distances_df_selected.set([])
 
 
 float_vars = dict(

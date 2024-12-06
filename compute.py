@@ -50,6 +50,59 @@ def compute_pair_distances(helices, lengths=None, target_total_count=-1):
     else:
         return np.sort(dists_same_class), min_len
 
+def find_first_peak(distances, cutoff=500):
+    import numpy as np
+    from scipy.stats import gaussian_kde
+    distances_work = np.sort(np.hstack((-distances, distances)))
+    kde = gaussian_kde(distances_work)
+    kde_x = np.arange(np.min(distances_work).round(), np.max(distances_work).round()+0.5)
+    kde_y = kde.pdf(kde_x)
+    from scipy.signal import find_peaks
+    peaks, _ = find_peaks(kde_y, prominence=(0.01/len(kde_x), None))
+    peaks = np.sort(peaks)
+    index_0 = (np.where(kde_x>=0))[0][0]
+    peaks = peaks[peaks>=index_0] - index_0
+    kde_x = kde_x[index_0:]
+    kde_y = kde_y[index_0:]
+    first_peak = 0
+    if peaks is not None:
+        if len(peaks)==1:
+            if peaks[0]>=cutoff:
+                first_peak=peaks[0]
+        else:
+            if peaks[0]>=cutoff:
+                first_peak=peaks[0]
+            else:
+                if peaks[1]>=cutoff:
+                    first_peak=peaks[1]
+    return first_peak,peaks
+
+def find_pitch(distances):
+    import numpy as np
+    from scipy.stats import gaussian_kde
+    distances_work = np.sort(np.hstack((-distances, distances)))
+    kde = gaussian_kde(distances_work)
+    kde_x = np.arange(np.min(distances_work).round(), np.max(distances_work).round()+0.5)
+    kde_y = kde.pdf(kde_x)
+    from scipy.signal import find_peaks
+    peaks, _ = find_peaks(kde_y, prominence=(0.01/len(kde_x), None))
+    peaks = np.sort(peaks)
+    index_0 = (np.where(kde_x>=0))[0][0]
+    peaks = peaks[peaks>=index_0] - index_0
+    kde_x = kde_x[index_0:]
+    kde_y = kde_y[index_0:]
+    print(peaks)
+    if len(peaks)<3: return None
+    dist = np.sort(peaks[1:]-peaks[:-1])
+    pitch_tmp = np.percentile(dist, 50, method='lower')
+    ns = peaks/pitch_tmp
+    ns_int = np.round(ns)
+    err = np.abs(ns-ns_int)
+    peak_mask = np.where(err<0.1)
+    if np.count_nonzero(peak_mask)<2: return None
+    pitch = np.sum(peaks[peak_mask])/np.sum(ns_int[peak_mask])
+    return (pitch, kde_x, kde_y)
+
 
 def select_helices_by_length(helices, lengths, min_len, max_len):
     min_len = 0 if min_len is None else min_len
@@ -80,6 +133,12 @@ def get_filament_length(helices, particle_box_length=0):
 def select_classes(params, class_indices):
     class_indices_tmp = np.array(class_indices) + 1
     mask = params["rlnClassNumber"].astype(int).isin(class_indices_tmp)
+    particles = params.loc[mask, :]
+    helices = list(particles.groupby(["rlnMicrographName", "rlnHelicalTubeID"]))
+    return helices
+
+def select_helices_from_helixID(params, ids):
+    mask = params["helixID"].astype(int).isin(ids)
     particles = params.loc[mask, :]
     helices = list(particles.groupby(["rlnMicrographName", "rlnHelicalTubeID"]))
     return helices
@@ -200,6 +259,16 @@ def get_class2d_from_file(classFile):
     return data, round(apix, 4)
 
 
+
+def get_class2d_helix_params_from_url(url):
+    df = get_class2d_params_from_url(url)
+    helices = df.groupby(["rlnMicrographName", "rlnHelicalTubeID"])
+    for hi, (_, helix) in enumerate(helices):
+        l = helix["rlnHelicalTrackLengthAngst"].astype(float).max().round()
+        df.loc[helix.index, "length"] = l
+        df.loc[helix.index, "helixID"] = hi + 1   
+    return df
+
 @memory.cache
 def get_class2d_params_from_url(url):
     url_final = get_direct_url(url)  # convert cloud drive indirect url to direct url
@@ -212,11 +281,21 @@ def get_class2d_params_from_url(url):
     return data
 
 
+def get_class2d_helix_params_from_file(params_file):
+    df = get_class2d_params_from_file(params_file)
+    helices = df.groupby(["rlnMicrographName", "rlnHelicalTubeID"])
+    for hi, (_, helix) in enumerate(helices):
+        l = helix["rlnHelicalTrackLengthAngst"].astype(float).max().round()
+        df.loc[helix.index, "length"] = l
+        df.loc[helix.index, "helixID"] = hi + 1   
+    return df
+
 def get_class2d_params_from_file(params_file):
     if params_file.endswith(".star"):
         params = star_to_dataframe(params_file)
     elif params_file.endswith(".cs"):
         params = cs_to_dataframe(params_file)
+    
     required_attrs = np.unique(
         "rlnImageName rlnHelicalTubeID rlnHelicalTrackLengthAngst rlnClassNumber rlnAnglePsi".split()
     )
