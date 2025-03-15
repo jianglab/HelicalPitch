@@ -35,7 +35,6 @@ pair_distances_df_selected = reactive.value([])
 ui.head_content(ui.tags.title("HelicalPitch"))
 helicon.shiny.google_analytics(id="G-998MGRETTF")
 helicon.shiny.setup_ajdustable_sidebar()
-helicon.shiny.set_input_text_numeric_update_on_change()
 ui.tags.style(
     """
     * { font-size: 10pt; padding:0; border: 0; margin: 0; }
@@ -173,7 +172,12 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                 col_widths=[6, 6, 12], style="align-items: flex-end;"
             ):
                 ui.input_numeric(
-                    "min_len", "Minimal length (Å)", min=0.0, value=0, step=1.0
+                    "min_len",
+                    "Minimal length (Å)",
+                    min=0.0,
+                    value=0,
+                    step=1.0,
+                    update_on="blur",
                 )
                 ui.input_numeric(
                     "rise",
@@ -182,6 +186,7 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                     max=1000.0,
                     value=4.75,
                     step=0.01,
+                    update_on="blur",
                 )
                 with ui.accordion(id="additional_parameters", open=False):
                     with ui.accordion_panel(title="Additional parameters:"):
@@ -215,6 +220,7 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                                 min=-1,
                                 value=-1,
                                 step=1.0,
+                                update_on="blur",
                             )
                             ui.input_numeric(
                                 "max_pair_dist",
@@ -222,6 +228,7 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                                 min=-1,
                                 value=-1,
                                 step=1.0,
+                                update_on="blur",
                             )
                             ui.input_numeric(
                                 "bins",
@@ -229,6 +236,7 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                                 min=1,
                                 value=100,
                                 step=1,
+                                update_on="blur",
                             )
 
                 @reactive.effect
@@ -245,7 +253,7 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                         ui.update_numeric("min_len", max=input.max_len())
                     if input.min_len() >= input.max_len():
                         ui.update_numeric("min_len", value=0)
-            
+
             @render.data_frame
             @reactive.event(params, input.select_classes)
             def display_helices_dataframe():
@@ -266,7 +274,8 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
 
                 if len(input.select_classes()):
                     selected_classes = [
-                        int(displayed_class_ids()[i]) + 1 for i in input.select_classes()
+                        int(displayed_class_ids()[i]) + 1
+                        for i in input.select_classes()
                     ]
                     summary_df = summary_df[
                         summary_df["classes"].apply(
@@ -288,18 +297,21 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                     height="30vh",
                     width="100%",
                 )
-            
+
             @reactive.effect
             def get_df_selected_helices():
                 df_selected = display_helices_dataframe.data_view(selected=True)
-                df_selected_helixids = df_selected['helixID'].tolist()
+                df_selected_helixids = df_selected["helixID"].tolist()
                 mask = params()["helixID"].astype(int).isin(df_selected_helixids)
                 particles = params().loc[mask, :]
-                class_indices = [displayed_class_ids()[i] for i in input.select_classes()]
-                helices = compute.select_classes(params=particles, class_indices=class_indices)
-                
-                
-                #if len(helices):
+                class_indices = [
+                    displayed_class_ids()[i] for i in input.select_classes()
+                ]
+                helices = compute.select_classes(
+                    params=particles, class_indices=class_indices
+                )
+
+                # if len(helices):
                 #    class_indices2 = (
                 #        np.unique(
                 #            np.concatenate([h["rlnClassNumber"] for hi, h in helices])
@@ -395,27 +407,27 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
                 return None
 
         @render_plotly
-        @reactive.event(pair_distances_df_selected, input.bins, input.max_pair_dist, input.rise)
+        @reactive.event(
+            pair_distances_df_selected, input.bins, input.max_pair_dist, input.rise
+        )
         def pair_distances_histogram_df_selected_display():
             req(input.bins() is not None and input.bins() > 0)
             req(input.max_pair_dist() is not None)
             req(input.rise() is not None and input.rise() > 0)
             fig = getattr(pair_distances_histogram_df_selected_display, "fig", None)
             data = pair_distances_df_selected()
-            
+
             try:
                 pitch = compute.find_pitch(data)
-                print('Found pitch = '+ str(pitch))
+                print("Found pitch = " + str(pitch))
             except:
-                print('No pitch found')
-            
+                print("No pitch found")
+
             (helices, filement_lengths, _) = df_selected_helices()
-            
+
             if len(helices):
                 class_indices = np.unique(
-                    np.concatenate(
-                        [h["rlnClassNumber"] for hi, h in helices]
-                    )
+                    np.concatenate([h["rlnClassNumber"] for hi, h in helices])
                 ).astype(int)
             else:
                 class_indices = []
@@ -449,8 +461,8 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
 
             return fig
 
-        #@render.ui
-        #def get_download_estimated_first_peaks_ui():
+        # @render.ui
+        # def get_download_estimated_first_peaks_ui():
         #    download_ui = render.download(
         #        label="Download estimated first peaks", filename="peaks.txt"
         #    )
@@ -467,17 +479,17 @@ with ui.layout_columns(col_widths=(5, 7, 12)):
         #            helices = compute.select_classes(params=particles, class_indices=class_indices)
         #            dists, _ = compute.compute_pair_distances(helices=helices)
         #            try:
-        #                first_peak,peaks = compute.find_first_peak(dists)                
+        #                first_peak,peaks = compute.find_first_peak(dists)
         #            except:
         #                first_peak=0
         #                peaks=[]
         #            out_str+= str(hid)+","+str(first_peak)+","+str(peaks)+"\n"
         #        yield out_str
-        #    
+        #
         #    return download_ui
 
     ui.HTML(
-        "<i><p>Developed by the <a href='https://jiang.bio.purdue.edu/HelicalPitch' target='_blank'>Jiang Lab</a>. Report issues to <a href='https://github.com/jianglab/HelicalPitch/issues' target='_blank'>HelicalPitch@GitHub</a>.</p></i>"
+        "<i><p>Developed by the <a href='https://jianglab.science.psu.edu/HelicalPitch' target='_blank'>Jiang Lab</a>. Report issues to <a href='https://github.com/jianglab/HelicalPitch/issues' target='_blank'>HelicalPitch@GitHub</a>.</p></i>"
     )
 
 
@@ -667,7 +679,6 @@ def get_selected_helices():
         selected_helices_min_len.set((selected_helices(), input.min_len()))
 
 
-
 @reactive.effect
 @reactive.event(selected_helices)
 def auto_set_filament_min_len():
@@ -682,7 +693,7 @@ def auto_set_filament_min_len():
 
 
 @reactive.effect
-@reactive.event(input.min_len_changed)
+@reactive.event(input.min_len)
 def update_selected_helices_min_len():
     selected_helices_min_len.set((selected_helices(), input.min_len()))
 
@@ -720,7 +731,8 @@ def get_pair_lengths():
         pair_distances.set(dists)
     else:
         pair_distances.set([])
-        
+
+
 @reactive.effect
 @reactive.event(df_selected_helices)
 def get_pair_lengths_df_selected():
